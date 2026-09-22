@@ -1,0 +1,26 @@
+{
+  "name": "career-services-reminder-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automatic event reminder and communication system for Career Services, BITS Pilani Dubai Campus.",
+  "type": "commonjs",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "migrate": "node server/db/migrate.js",
+    "seed": "node server/db/seed.js",
+    "reset": "node server/db/reset.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.0",
+    "dotenv": "^17.2.4",
+    "express": "^5.2.0",
+    "nodemailer": "^7.0.10",
+    "zod": "^4.1.13"
+  }
+}

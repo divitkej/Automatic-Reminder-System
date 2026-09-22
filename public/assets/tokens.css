@@ -1,0 +1,48 @@
+/* ---------------------------------------------------------------------------
+   Career Services Automatic Event Reminder System
+   Shared design tokens.
+
+   The palette is taken from the institution's own printed material: a deep
+   navy, warm paper, and a single accent used only where something is
+   actionable. Corners are near square, borders are real lines rather than
+   shadows, and nothing animates that a member of staff would have to wait for.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --navy-900: #0f2440;
+  --navy-800: #16304f;
+  --navy-700: #1d3f66;
+  --accent-700: #1c4f82;
+  --accent-600: #2463a4;
+  --accent-050: #eaf1f8;
+
+  --ink-900: #16202e;
+  --ink-700: #2f3947;
+  --ink-500: #5b6472;
+  --ink-400: #78808d;
+
+  --paper: #f2f1ee;
+  --paper-sunk: #e9e7e2;
+  --surface: #ffffff;
+  --surface-muted: #faf9f7;
+
+  --line: #ddd9d2;
+  --line-strong: #c7c1b8;
+
+  --good-700: #1f6b4a;
+  --good-050: #e8f3ed;
+  --warn-700: #8a5a00;
+  --warn-050: #fbf3e2;
+  --alert-700: #9b2c2c;
+  --alert-050: #fbeded;
+  --info-700: #1c4f82;
+  --info-050: #eaf1f8;
+
+  --radius: 3px;
+  --radius-lg: 4px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-sheet: 0 1px 2px rgba(15, 36, 64, 0.06);
+}
