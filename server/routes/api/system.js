@@ -10,6 +10,7 @@ const channels = require('../../services/channels');
 const activity = require('../../services/activity');
 const { presetFor } = require('../../services/reminder-presets');
 const dt = require('../../lib/datetime');
+const { getSetting } = require('../../db');
 
 const router = express.Router();
 
@@ -31,6 +32,9 @@ router.get('/meta', asyncHandler(async (req, res) => {
     public_base_url: config.publicBaseUrl,
     dry_run: config.dryRun,
     auth_enabled: config.auth.enabled,
+    // Set when the demonstration data was loaded into an empty database, so
+    // every screen that shows figures can say where those figures came from.
+    demo_data_seeded_at: getSetting('demo_data_seeded_at', null),
   });
 }));
 

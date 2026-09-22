@@ -82,11 +82,20 @@ router.post('/sign-out', (req, res) => {
   res.redirect('/sign-in');
 });
 
-/** Guard for the staff console and its API. */
+/**
+ * Guard for the staff console and its API.
+ *
+ * This runs as mounted middleware, and express rewrites req.url to be relative
+ * to the mount point, so the check has to be against originalUrl. An API call
+ * needs a 401 it can act on, not a redirect to an HTML login page that fetch
+ * would follow and then fail to parse.
+ */
 function requireStaff(req, res, next) {
   if (isSignedIn(req)) return next();
-  if (req.path.startsWith('/api/')) {
-    return res.status(401).json({ error: { message: 'Sign in to use the Career Services console.', code: 'signed_out' } });
+  if (req.originalUrl.startsWith('/api/')) {
+    return res.status(401).json({
+      error: { message: 'Sign in to use the Career Services console.', code: 'signed_out' },
+    });
   }
   return res.redirect('/sign-in');
 }

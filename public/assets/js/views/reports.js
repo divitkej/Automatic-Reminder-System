@@ -1,7 +1,7 @@
 import { h, frag, formValues } from '../dom.js';
 import { api, query } from '../api.js';
 import { setQuery } from '../router.js';
-import { setHeader, setMain } from '../shell.js';
+import { setHeader, setMain, state } from '../shell.js';
 import { panel, dataTable, field, tiles, notice, bar, emptyState } from '../components.js';
 import { longDate, todayIso, percent } from '../format.js';
 
@@ -31,6 +31,9 @@ export async function reportsView({ query: q = {} }) {
   const totalAttended = data.by_type.reduce((sum, row) => sum + row.attended, 0);
 
   setMain(
+    state.meta.demo_data_seeded_at
+      ? notice('warning', 'These figures include demonstration data loaded on first start. Run "npm run reset" to clear it.')
+      : null,
     h('.panel', form,
       h('.panel-body',
         h('p.small.muted', `${longDate(data.from)} to ${longDate(data.to)}. Cancelled events are left out.`))),

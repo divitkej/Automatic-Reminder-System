@@ -72,7 +72,7 @@ app.get(CONSOLE_ROUTES, auth.requireStaff, (req, res) => {
 // Errors
 // ---------------------------------------------------------------------------
 app.use((req, res) => {
-  if (req.path.startsWith('/api/')) {
+  if (req.originalUrl.startsWith('/api/')) {
     return res.status(404).json({ error: { message: 'Not found.' } });
   }
   res.status(404).type('html').send(page({
@@ -89,7 +89,7 @@ app.use((error, req, res, next) => { // eslint-disable-line no-unused-vars
   }
   const message = status >= 500 ? 'Something went wrong at our end. The error has been logged.' : error.message;
 
-  if (req.path.startsWith('/api/')) {
+  if (req.originalUrl.startsWith('/api/')) {
     return res.status(status).json({
       error: { message, details: error.details || null, name: error.name || 'Error' },
     });

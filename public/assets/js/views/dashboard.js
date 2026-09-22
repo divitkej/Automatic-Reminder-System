@@ -43,6 +43,13 @@ export async function dashboardView() {
       ? notice('warning', 'The background worker is not running in this process.')
       : null;
 
+  const demoNote = state.meta.demo_data_seeded_at
+    ? notice('warning', h('div',
+      h('p', h('strong', 'This database holds demonstration data.'),
+        ' The students, events, responses and delivery history below were generated on first start so the screens had something to show. None of it is real.'),
+      h('p.small', 'Run "npm run reset" to clear it, or set SEED_DEMO_DATA=false before the first start of a fresh database.')))
+    : null;
+
   const dryRunNote = state.meta.dry_run
     ? notice('info', h('div',
       h('p', 'Dry run is on. Every message is composed, scheduled and recorded in full, but nothing leaves the machine.'),
@@ -50,6 +57,7 @@ export async function dashboardView() {
     : null;
 
   setMain(
+    demoNote,
     dryRunNote,
     schedulerNote,
     attention,
