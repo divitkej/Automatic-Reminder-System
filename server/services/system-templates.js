@@ -12,8 +12,7 @@
  * is why those bodies are kept short and put the essential facts first.
  */
 
-const SIGN_OFF = `{{org.short_name}}
-{{org.name}}
+const SIGN_OFF = `{{org.name}}
 {{org.email}} | {{org.phone}}`;
 
 const EVENT_BLOCK = `Event: {{event.name}}
@@ -224,7 +223,7 @@ ${EVENT_BLOCK}
 Please come prepared:
 
 1. Bring at least ten printed copies of your CV.
-2. Business formal dress is expected{{#if event.dress_code}} ({{event.dress_code}}){{/if}}.
+2. {{#if event.dress_code}}Dress code: {{event.dress_code}}.{{else}}Business formal dress is expected.{{/if}}
 3. Carry your campus identity card. It is required for entry.
 4. Prepare a ninety second introduction covering your programme, your project work and the roles you are seeking.
 5. Note the three employers you most want to meet and visit them first.
@@ -255,7 +254,7 @@ Please prepare the following:
 1. A printed copy of the CV you want the panel to work from.
 2. Two examples of project or internship work you can talk through in detail.
 3. Two questions you would genuinely ask an employer.
-4. Business formal dress{{#if event.dress_code}}: {{event.dress_code}}{{/if}}.
+4. {{#if event.dress_code}}Dress code: {{event.dress_code}}.{{else}}Business formal dress.{{/if}}
 
 {{#if event.is_online}}Test your camera and microphone before the session and join from a quiet room with a plain background.
 {{/if}}{{#if event.is_in_person}}Please report to the venue ten minutes before your slot.

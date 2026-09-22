@@ -1,1 +1,43 @@
-<!doctype html><html><head><meta charset="utf-8"><title>Console</title></head><body>placeholder</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="description" content="Career Services event reminder console, BITS Pilani Dubai Campus." />
+<title>Career Services Console</title>
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/assets/console.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="shell">
+    <nav class="sidebar" aria-label="Sections">
+      <a class="wordmark" href="/">
+        <span class="wordmark-institution">BITS Pilani, Dubai</span>
+        <span class="wordmark-unit">Career Services</span>
+      </a>
+      <ul class="nav" id="nav"></ul>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </nav>
+
+    <div class="main-column">
+      <header class="topbar" id="topbar"></header>
+      <main id="main" class="main" tabindex="-1">
+        <p class="loading">Loading the console.</p>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/assets/js/app.js"></script>
+  <noscript>
+    <p style="padding:24px;font:400 16px/1.6 system-ui,sans-serif;">
+      The Career Services console needs JavaScript. Student registration and feedback pages work without it.
+    </p>
+  </noscript>
+</body>
+</html>

@@ -177,11 +177,12 @@ function humaniseOffset(minutes) {
   const abs = Math.abs(minutes);
   const suffix = minutes < 0 ? 'before' : 'after';
   if (abs === 0) return 'at the anchor time';
+  // Exact whole weeks, days and hours read best on their own. Anything else
+  // falls through to the composite wording below.
   const units = [
     [7 * 24 * 60, 'week'],
     [24 * 60, 'day'],
     [60, 'hour'],
-    [1, 'minute'],
   ];
   for (const [size, label] of units) {
     if (abs % size === 0 && abs >= size) {
@@ -189,11 +190,14 @@ function humaniseOffset(minutes) {
       return `${value} ${label}${value === 1 ? '' : 's'} ${suffix}`;
     }
   }
-  const hours = Math.floor(abs / 60);
+  const days = Math.floor(abs / (24 * 60));
+  const hours = Math.floor((abs % (24 * 60)) / 60);
   const mins = abs % 60;
   const parts = [];
+  if (days) parts.push(`${days} day${days === 1 ? '' : 's'}`);
   if (hours) parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
-  if (mins) parts.push(`${mins} minute${mins === 1 ? '' : 's'}`);
+  // Minutes are noise once the offset runs to days.
+  if (mins && !days) parts.push(`${mins} minute${mins === 1 ? '' : 's'}`);
   return `${parts.join(' ')} ${suffix}`;
 }
 

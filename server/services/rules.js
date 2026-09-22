@@ -111,7 +111,12 @@ function warningsFor(event, rule) {
   const warnings = [];
   const sendAt = sendTimeFor(event, rule);
   if (sendAt.getTime() < Date.now() && event.status !== 'completed') {
-    warnings.push('This send time has already passed, so nothing will go out for it.');
+    // Only a worry if the moment passed without anything being produced for it.
+    // Once the outbox holds rows for this rule, the reminder has done its job.
+    const produced = getDb().prepare('SELECT COUNT(*) AS n FROM messages WHERE rule_id = ?').get(rule.id).n;
+    if (produced === 0) {
+      warnings.push('This send time has already passed, so nothing will go out for it.');
+    }
   }
   if (rule.anchor === 'start' && rule.offset_minutes > 0) {
     warnings.push('This is timed after the event starts. Use the event end as the anchor for post event messages.');

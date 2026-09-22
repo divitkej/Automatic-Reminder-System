@@ -14,7 +14,7 @@
     "migrate": "node server/db/migrate.js",
     "seed": "node server/db/seed.js",
     "reset": "node server/db/reset.js",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.0",
