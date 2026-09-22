@@ -185,8 +185,9 @@ that has already started is worse than no reminder.
 ### Registration, capacity and the waiting list
 
 Students reply through a personal link. Where an event has a capacity,
-confirmations past the limit join a waiting list, and a withdrawal promotes the
-earliest waiting student automatically. That is the job Career Services
+confirmations past the limit join a waiting list. A withdrawal promotes the
+earliest waiting student automatically and sends them their confirmation, so
+the released place is actually taken up. That is the job Career Services
 otherwise does by hand on the morning of the event.
 
 Registration and feedback links act only on a form submission, never on a bare

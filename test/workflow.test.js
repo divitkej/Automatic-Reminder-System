@@ -190,6 +190,42 @@ test('switching a reminder off withdraws the copies still waiting', () => {
   assert.ok(withdrawn > 0);
 });
 
+test('switching a reminder back on restores the copies it withdrew', () => {
+  const { event, cohort } = buildEvent({ prefix: 'G2XXXG' });
+  workflow.publish(event.id);
+
+  const invitation = rules.list(event.id).find((r) => r.category === 'invitation' && r.audience_rule === 'all');
+  const pending = () => getDb()
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE rule_id = ? AND status = 'scheduled'")
+    .get(invitation.id).n;
+
+  assert.equal(pending(), cohort.length);
+
+  rules.update(event.id, invitation.id, { enabled: false });
+  outbox.materialise(event.id);
+  assert.equal(pending(), 0, 'switching off withdraws them');
+
+  rules.update(event.id, invitation.id, { enabled: true });
+  const report = outbox.materialise(event.id);
+  assert.equal(pending(), cohort.length, 'switching back on restores them');
+  assert.equal(report.restored, cohort.length);
+  assert.equal(report.created, 0, 'they are restored, not duplicated');
+});
+
+test('a message a member of staff withdrew by hand is not silently restored', () => {
+  const { event } = buildEvent({ prefix: 'P2023P' });
+  workflow.publish(event.id);
+
+  const target = getDb()
+    .prepare("SELECT id FROM messages WHERE event_id = ? AND status = 'scheduled' LIMIT 1")
+    .get(event.id);
+  outbox.cancelMessage(target.id);
+
+  outbox.materialise(event.id);
+  const after = getDb().prepare('SELECT status FROM messages WHERE id = ?').get(target.id);
+  assert.equal(after.status, 'cancelled');
+});
+
 test('cancelling an event withdraws pending messages and queues a notice', () => {
   const { event } = buildEvent({ prefix: 'H2023H' });
   workflow.publish(event.id);
@@ -350,4 +386,70 @@ test('an in person event without a venue cannot be saved', () => {
     timezone: 'Asia/Dubai',
     mode: 'in_person',
   }), /venue/i);
+});
+
+test('timestamps written by the system are all ISO instants', () => {
+  const { event } = buildEvent({ prefix: 'Q2023Q' });
+  workflow.publish(event.id);
+  workflow.cancel(event.id, { reason: 'Testing.', notify: false });
+
+  const rows = getDb()
+    .prepare("SELECT updated_at FROM messages WHERE event_id = ? AND status = 'cancelled'")
+    .all(event.id);
+  assert.ok(rows.length > 0);
+  for (const row of rows) {
+    assert.match(row.updated_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, row.updated_at);
+  }
+});
+
+test('materialiseAll picks up a live event and leaves a long finished one alone', () => {
+  const { event } = buildEvent({ prefix: 'R2023R' });
+  workflow.publish(event.id);
+  getDb().prepare("UPDATE messages SET status = 'cancelled' WHERE event_id = ?").run(event.id);
+
+  const totals = outbox.materialiseAll();
+  assert.ok(totals.events >= 1, 'the live event is in range');
+
+  const ancient = events.create({
+    name: 'From another semester',
+    type: 'workshop',
+    event_date: dateIn(-400),
+    start_time: '10:00',
+    end_time: '11:00',
+    timezone: 'Asia/Dubai',
+    mode: 'in_person',
+    venue: 'Room 2',
+  });
+  events.setStatus(ancient.id, 'completed');
+  const ids = getDb()
+    .prepare("SELECT id FROM events WHERE status IN ('scheduled', 'completed') AND ends_at_utc >= ?")
+    .all(new Date(Date.now() - 30 * 86400000).toISOString())
+    .map((r) => r.id);
+  assert.ok(!ids.includes(ancient.id), 'an event from last year is out of range');
+});
+
+test('a re-confirmation produces a new message, a repeat submission does not', () => {
+  const { event } = buildEvent({ prefix: 'S2023S' });
+  workflow.publish(event.id);
+  const row = registrations.listForEvent(event.id)[0];
+
+  const confirmations = () => getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM messages
+              WHERE registration_id = ? AND dedupe_key LIKE 'sys_confirmation_email:%'`)
+    .get(row.id).n;
+
+  registrations.respond(row.id, 'confirm');
+  outbox.queueTransactional(row.id, 'sys_confirmation_email');
+  assert.equal(confirmations(), 1);
+
+  // Submitting the same answer again must not produce a second copy.
+  registrations.respond(row.id, 'confirm');
+  outbox.queueTransactional(row.id, 'sys_confirmation_email');
+  assert.equal(confirmations(), 1);
+
+  // Changing their mind and coming back is a new answer, and deserves one.
+  registrations.respond(row.id, 'decline');
+  registrations.respond(row.id, 'confirm');
+  outbox.queueTransactional(row.id, 'sys_confirmation_email');
+  assert.equal(confirmations(), 2);
 });

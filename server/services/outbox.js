@@ -24,6 +24,9 @@ const activity = require('./activity');
  * event data and hands it to the channel.
  */
 
+/** Recorded on a message withdrawn because its reminder was switched off. */
+const SWITCHED_OFF = 'The reminder was switched off';
+
 const AUDIENCE_SQL = {
   all: "r.status <> 'cancelled'",
   registered: "r.status = 'registered'",
@@ -81,7 +84,7 @@ function renderMessage({ event, student, registration, template, messageId, at }
  */
 function materialise(eventId, { actor = 'system' } = {}) {
   const event = events.get(eventId);
-  const report = { created: 0, retimed: 0, cancelled: 0, skipped: 0 };
+  const report = { created: 0, retimed: 0, cancelled: 0, restored: 0, skipped: 0 };
 
   if (event.status === 'draft') {
     return { ...report, reason: 'The event is still a draft, so nothing is scheduled.' };
@@ -102,8 +105,8 @@ function materialise(eventId, { actor = 'system' } = {}) {
     `).all(eventId);
     for (const row of orphaned) {
       if (activeRuleIds.has(row.rule_id)) continue;
-      getDb().prepare(`UPDATE messages SET status = 'cancelled', skip_reason = 'The reminder was switched off', updated_at = ? WHERE id = ?`)
-        .run(at, row.id);
+      getDb().prepare('UPDATE messages SET status = \'cancelled\', skip_reason = ?, updated_at = ? WHERE id = ?')
+        .run(SWITCHED_OFF, at, row.id);
       report.cancelled += 1;
     }
 
@@ -128,6 +131,15 @@ function materialise(eventId, { actor = 'system' } = {}) {
             getDb().prepare('UPDATE messages SET scheduled_for = ?, updated_at = ? WHERE id = ?')
               .run(sendAt, at, existing.id);
             report.retimed += 1;
+          } else if (existing.status === 'cancelled' && existing.skip_reason === SWITCHED_OFF
+                     && new Date(sendAt).getTime() > Date.now()) {
+            // The reminder was switched off and has been switched back on, and
+            // its moment has not passed. Restore it rather than leaving the
+            // student with a gap the interface says nothing about.
+            getDb().prepare(`UPDATE messages SET status = 'scheduled', skip_reason = NULL,
+                             scheduled_for = ?, updated_at = ? WHERE id = ?`)
+              .run(sendAt, at, existing.id);
+            report.restored += 1;
           }
           continue;
         }
@@ -158,12 +170,12 @@ function materialise(eventId, { actor = 'system' } = {}) {
     }
   });
 
-  if (report.created || report.retimed || report.cancelled) {
+  if (report.created || report.retimed || report.cancelled || report.restored) {
     activity.log({
       eventId,
       actor,
       action: 'outbox.materialised',
-      detail: `${report.created} scheduled, ${report.retimed} retimed, ${report.cancelled} withdrawn`,
+      detail: `${report.created} scheduled, ${report.retimed} retimed, ${report.restored} restored, ${report.cancelled} withdrawn`,
     });
   }
   return report;
@@ -171,13 +183,17 @@ function materialise(eventId, { actor = 'system' } = {}) {
 
 /** Materialise every event whose schedule could still produce a message. */
 function materialiseAll() {
+  // Both bounds are ISO instants, matching the column format exactly. SQLite's
+  // own datetime() renders "YYYY-MM-DD HH:MM:SS", which does not compare
+  // correctly against "YYYY-MM-DDTHH:MM:SS.sssZ" as a string.
   const horizon = new Date(Date.now() + 30 * dt.DAY).toISOString();
+  const floor = new Date(Date.now() - 30 * dt.DAY).toISOString();
   const rows = getDb().prepare(`
     SELECT id FROM events
     WHERE status IN ('scheduled', 'completed')
-      AND ends_at_utc >= datetime('now', '-30 days')
+      AND ends_at_utc >= ?
       AND starts_at_utc <= ?
-  `).all(horizon);
+  `).all(floor, horizon);
   const totals = { events: rows.length, created: 0, retimed: 0, cancelled: 0 };
   for (const row of rows) {
     const report = materialise(row.id);
@@ -407,13 +423,18 @@ function queueTransactional(registrationId, templateKey, { label, category, acto
   const at = dt.nowIso();
   const context = buildContext({ event, student: registration, registration, messageId, at: Date.now() });
 
+  // The response time is part of the key, so a student who declines and later
+  // confirms again receives a fresh confirmation, while submitting the same
+  // answer twice does not produce a second copy.
+  const dedupeKey = `${templateKey}:${registrationId}:${registration.responded_at || 'initial'}`;
+
   db.prepare(`
     INSERT INTO messages (id, dedupe_key, event_id, rule_id, registration_id, student_id,
                           category, channel, label, to_address, subject, body,
                           scheduled_for, status, created_at, updated_at)
     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)
     ON CONFLICT (dedupe_key) DO NOTHING
-  `).run(messageId, `${templateKey}:${registrationId}`, event.id, registration.id, registration.student_id,
+  `).run(messageId, dedupeKey, event.id, registration.id, registration.student_id,
     category || template.category, template.channel, label || template.name, address,
     template.subject ? tpl.tidy(tpl.render(template.subject, context)) : null,
     tpl.tidy(tpl.render(template.body, context)), at, at, at);

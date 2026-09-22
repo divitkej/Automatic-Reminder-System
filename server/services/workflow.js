@@ -1,6 +1,7 @@
 'use strict';
 
 const { getDb } = require('../db');
+const { nowIso } = require('../lib/datetime');
 const { ValidationError, ConflictError } = require('../lib/errors');
 const events = require('./events');
 const rules = require('./rules');
@@ -174,9 +175,9 @@ function cancel(eventId, { reason = '', notify = true, actor = 'staff' } = {}) {
   }
 
   const withdrawn = getDb().prepare(`
-    UPDATE messages SET status = 'cancelled', skip_reason = 'The event was cancelled', updated_at = datetime('now')
+    UPDATE messages SET status = 'cancelled', skip_reason = 'The event was cancelled', updated_at = ?
     WHERE event_id = ? AND status = 'scheduled' AND category <> 'cancellation'
-  `).run(eventId).changes;
+  `).run(nowIso(), eventId).changes;
 
   activity.log({
     eventId,

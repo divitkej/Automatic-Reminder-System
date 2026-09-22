@@ -163,11 +163,26 @@ router.post('/r/:token/respond', asyncHandler(async (req, res) => {
   let flash;
   try {
     const result = registrations.respond(registration.id, action, { actor: 'student' });
+
+    if (result.promoted) {
+      // Releasing a place moved the first waiting student up. They only know
+      // that if we tell them, so the confirmation goes out to them too.
+      outbox.queueTransactional(result.promoted, 'sys_confirmation_email', {
+        label: 'Promoted from the waiting list',
+      });
+    }
+
     if (result.status === 'registered') {
       outbox.queueTransactional(registration.id, 'sys_confirmation_email', { label: 'Registration confirmed' });
-      flash = { tone: 'good', text: 'Your place is confirmed. A confirmation has been sent to your campus email address.' };
+      flash = {
+        tone: 'good',
+        text: 'Your place is confirmed. A confirmation has been sent to your campus email address.',
+      };
     } else if (result.status === 'waitlisted') {
-      flash = { tone: 'notice', text: 'This event is full, so you have been added to the waiting list.' };
+      flash = {
+        tone: 'notice',
+        text: 'This event is full, so you have been added to the waiting list. We will write to you if a place opens.',
+      };
     } else {
       flash = { tone: 'notice', text: 'Thank you for telling us. Your place has been released.' };
     }
@@ -241,7 +256,7 @@ function feedbackPage(registration, event, { flash = null, existing = null } = {
     <form method="post" action="/f/${escapeHtml(registration.token)}" class="feedback-form">
       ${ratingField('overall_rating', 'Overall, how would you rate this session?', true)}
       ${ratingField('content_rating', 'How useful was the content?')}
-      ${event.speaker ? ratingField('speaker_rating', `How would you rate ${escapeHtml(event.speaker)}?`) : ''}
+      ${event.speaker ? ratingField('speaker_rating', `How would you rate ${event.speaker}?`) : ''}
       ${ratingField('organisation_rating', 'How well was the session organised?')}
 
       <fieldset class="choice">
