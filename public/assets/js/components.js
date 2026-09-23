@@ -281,6 +281,60 @@ export function downloadLink(href, label) {
   return h('a.btn', { href, download: '' }, icon('download'), label);
 }
 
+/**
+ * A button that puts text on the clipboard and says so.
+ *
+ * The clipboard API needs a secure context, which plain http on a campus
+ * machine is not, so there is a fallback through a hidden textarea. If both
+ * fail the text is shown for selection rather than silently lost.
+ */
+export function copyButton(label, getText, { small = true, onCopied } = {}) {
+  const button = h(`button.btn${small ? '.btn-small' : ''}`, {
+    type: 'button',
+    onclick: async () => {
+      const text = typeof getText === 'function' ? await getText() : getText;
+      const original = button.textContent;
+      let copied = false;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        }
+      } catch {
+        copied = false;
+      }
+      if (!copied) {
+        const area = h('textarea', {
+          value: text,
+          style: { position: 'fixed', top: '-1000px', opacity: '0' },
+        });
+        document.body.append(area);
+        area.select();
+        try {
+          copied = document.execCommand('copy');
+        } catch {
+          copied = false;
+        }
+        area.remove();
+      }
+      if (copied) {
+        button.textContent = 'Copied';
+        setTimeout(() => { button.textContent = original; }, 1600);
+        if (onCopied) onCopied(text);
+      } else {
+        modal({
+          title: 'Copy this by hand',
+          wide: true,
+          body: frag(
+            h('p.small.muted', 'The browser would not let the page write to the clipboard. Select the text below and copy it.'),
+            h('textarea.code', { rows: 12, value: text, onfocus: (e) => e.target.select() })),
+        });
+      }
+    },
+  }, label);
+  return button;
+}
+
 export function spinnerText(text = 'Working.') {
   return h('p.muted.small', text);
 }

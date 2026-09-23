@@ -227,6 +227,12 @@ CREATE TABLE IF NOT EXISTS messages (
   opened_at       TEXT,
   clicked_at      TEXT,
   skip_reason     TEXT,
+  -- Messages due at the same moment for the same reminder are handed over as
+  -- one batch, so they carry a shared key.
+  batch_key       TEXT,
+  -- Set when a member of staff hands the batch to whoever sends campus mail.
+  handed_off_at   TEXT,
+  handed_off_by   TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
@@ -235,6 +241,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_due     ON messages (status, scheduled_f
 CREATE INDEX IF NOT EXISTS idx_messages_event   ON messages (event_id, scheduled_for);
 CREATE INDEX IF NOT EXISTS idx_messages_student ON messages (student_id);
 CREATE INDEX IF NOT EXISTS idx_messages_rule    ON messages (rule_id);
+-- idx_messages_batch is created by migrate(), after batch_key has been added
+-- to databases that predate it.
 
 -- --------------------------------------------------------------------------
 -- Built-in feedback form responses

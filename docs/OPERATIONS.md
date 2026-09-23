@@ -9,9 +9,14 @@ schedule, publish. The readiness panel on the event page lists anything
 blocking publication and, separately, anything merely worth a look. Nothing is
 sent while an event is a draft, so there is no risk in setting one up early.
 
-**While it is live.** Nothing to do. The dashboard shows what goes out next and
-flags anything that needs attention. The registration figures on the event page
-update as students reply.
+**While it is live.** Check the **To send** queue. The dashboard and the sidebar
+both carry the count, so there is nothing to remember. Each row is one reminder
+for one event: open it, take the messages out in whichever form your webmaster
+needs, send them, and mark the batch as sent.
+
+Marking it sent is the part that matters. The reminders that follow, such as the
+chase to students who have not replied, are timed from that point. If you mark
+one by mistake you can put it back in the queue.
 
 **On the day.** Open the event's attendance tab. "Mark everyone present" and
 then correcting the exceptions is usually quicker than the other way round. For
@@ -43,18 +48,30 @@ the record stays for reporting.
 reminders tab. Copies already sent stay in the record; copies still waiting are
 rebuilt for the new audience on the next worker pass.
 
-**Messages are showing as failed.** The outbox shows the provider's error on
-each row. Fix the cause, then use "Send now" on the individual message, or wait
-for the worker to retry. It gives up after three attempts.
+**Messages are showing as failed.** This only happens when the system sends for
+itself. The outbox shows the provider's error on each row. Fix the cause, then
+use "Send now" on the individual message, or wait for the worker to retry. It
+gives up after three attempts.
 
-**Nothing is being sent at all.** Check the settings screen. Either the
-background worker is not running, or dry run is still on. Both are stated
-plainly at the top of that screen and on the dashboard.
+**Nothing is appearing in the To send queue.** Check the settings screen. Either
+the background worker is not running, or the events in question are still
+drafts. Both are stated plainly at the top of that screen and on the dashboard.
 
-**The server was down when reminders were due.** Anything less than three hours
-late is sent as soon as the worker starts again. Anything older is marked
-skipped, with the reason, rather than sent at the wrong time. The window is
-`SCHEDULER_MAX_LATENESS_MINUTES`.
+**A student says the link in a group email does not work.** A message sent to a
+whole group points at the event's public page rather than a personal link. The
+student gives their campus ID and campus email there, and both have to match the
+record exactly. If their email on file is out of date, correct it under Students
+and they can try again.
+
+**The server was down when reminders were due.** While drafting, nothing is
+lost: the messages simply appear in the To send queue as soon as it is back, and
+they are never discarded for being late, because that would silently delete work
+somebody was meant to do. Check the due times before sending a batch that has
+been waiting a while.
+
+If the system is set to send for itself, anything less than three hours late is
+sent when the worker restarts and anything older is marked skipped with the
+reason. That window is `SCHEDULER_MAX_LATENESS_MINUTES`.
 
 ## Importing students
 

@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { icon } from '../icons.js';
 import { setHeader, setMain, state } from '../shell.js';
 import { panel, detailList, notice, badge, toast, dataTable } from '../components.js';
+import { deliveryLabel } from '../shell.js';
 import { relative, plural } from '../format.js';
 
 export async function settingsView() {
@@ -31,12 +32,19 @@ export async function settingsView() {
     detail: info.reason || (info.configured ? 'Verified.' : 'Messages on this channel are recorded but not sent.'),
   });
 
+  const modeNotice = {
+    draft: notice('info', h('div',
+      h('p', h('strong', 'This system drafts, it does not send.'),
+        ' It decides who gets what and when, renders each message in full, then holds it in the To send queue for a member of staff to hand over.'),
+      h('p.small', 'Nothing below needs configuring for this to work. The email and gateway settings only matter if you later switch to DELIVERY_MODE=send.'))),
+    preview: notice('warning', h('div',
+      h('p', h('strong', 'Dry run is on.'), ' Every message is composed, scheduled, tracked and shown in the outbox, but nothing is delivered and nothing waits to be handed over.'),
+      h('p.small', 'This mode is for testing. Use DELIVERY_MODE=draft for normal use, or DELIVERY_MODE=send to deliver directly.'))),
+    send: notice('good', 'This system sends for itself. Messages are delivered to students at their scheduled times.'),
+  }[state.meta.delivery_mode];
+
   setMain(
-    state.meta.dry_run
-      ? notice('warning', h('div',
-        h('p', h('strong', 'Dry run is on.'), ' Every message is composed, scheduled, tracked and shown in the outbox, but nothing is delivered to a student.'),
-        h('p.small', 'Set DRY_RUN=false in the environment and restart when you are ready to send for real. Run one test event first.')))
-      : notice('good', 'Dry run is off. Messages are delivered to students at their scheduled times.'),
+    modeNotice,
 
     !scheduler.enabled
       ? notice('error', 'The background worker is switched off, so nothing is sent automatically. Set SCHEDULER_ENABLED=true and restart.')
@@ -47,8 +55,11 @@ export async function settingsView() {
     h('.grid-2',
       panel({
         title: 'Background worker',
-        hint: 'What keeps the system automatic.',
+        hint: state.meta.is_draft_mode
+          ? 'Keeps the schedule moving and fills the To send queue.'
+          : 'What keeps the system automatic.',
         body: detailList([
+          ['Delivery', badge(deliveryLabel(state.meta.delivery_mode), state.meta.delivery_mode === 'send' ? 'sent' : 'neutral')],
           ['State', scheduler.enabled ? (scheduler.running ? badge('Running', 'sent') : badge('Stopped', 'failed')) : badge('Switched off', 'skipped')],
           ['Runs every', `${scheduler.interval_seconds} seconds`],
           ['Messages per run', String(scheduler.batch_size)],
@@ -63,7 +74,9 @@ export async function settingsView() {
 
       panel({
         title: 'Delivery channels',
-        hint: 'A channel with no provider configured records its messages without sending them.',
+        hint: state.meta.is_draft_mode
+          ? 'Not used while the system is drafting. Shown so you can see what a switch to sending would need.'
+          : 'A channel with no provider configured records its messages without sending them.',
         flush: true,
         body: dataTable([
           { label: 'Channel', render: (row) => h('span.row-title', row.name) },
@@ -101,6 +114,9 @@ export async function settingsView() {
     panel({
       title: 'What this system does not do',
       body: h('ul',
+        state.meta.is_draft_mode
+          ? h('li', h('strong', 'It does not send. '), 'It decides and drafts. Delivery is done by whoever sends campus mail, and this system records that it happened when you say so.')
+          : null,
         h('li', 'It does not read replies. A student who answers a reminder by email reaches the Career Services inbox, not this system.'),
         h('li', 'It does not hold documents. CVs and slide decks live wherever they already live; put the link in the event description.'),
         h('li', 'It does not decide who to invite. That stays with the team, through groups and filters.'),

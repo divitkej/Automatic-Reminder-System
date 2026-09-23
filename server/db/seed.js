@@ -288,8 +288,9 @@ function markDemoHistoryAsSent(eventId) {
   const due = db
     .prepare("SELECT id, scheduled_for FROM messages WHERE event_id = ? AND status = 'scheduled' AND scheduled_for < ?")
     .all(eventId, new Date().toISOString());
+  const provider = config.deliveryMode === 'draft' ? 'handed_off' : 'preview';
   const update = db.prepare(`
-    UPDATE messages SET status = 'sent', provider = 'preview', sent_at = ?,
+    UPDATE messages SET status = 'sent', provider = ?, sent_at = ?,
                         opened_at = ?, clicked_at = ?, updated_at = ?
     WHERE id = ?
   `);
@@ -299,6 +300,7 @@ function markDemoHistoryAsSent(eventId) {
       const opened = random() < 0.71;
       const clicked = opened && random() < 0.42;
       update.run(
+        provider,
         sentAt,
         opened ? new Date(new Date(sentAt).getTime() + Math.floor(random() * 6 * 3600) * 1000).toISOString() : null,
         clicked ? new Date(new Date(sentAt).getTime() + Math.floor(random() * 8 * 3600) * 1000).toISOString() : null,

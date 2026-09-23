@@ -352,7 +352,7 @@ export function messageStatus(row) {
 export async function showMessage(id, reload) {
   const message = await api.get(`/messages/${id}`);
   const actions = [];
-  if (message.status === 'scheduled') {
+  if (message.status === 'scheduled' && !state.meta.is_draft_mode) {
     actions.push(h('button.btn', {
       onclick: async (clickEvent) => {
         clickEvent.currentTarget.disabled = true;
@@ -361,6 +361,8 @@ export async function showMessage(id, reload) {
         if (reload) reload();
       },
     }, icon('send'), 'Send now'));
+  }
+  if (message.status === 'scheduled') {
     actions.push(h('button.btn.btn-danger', {
       onclick: async (clickEvent) => {
         clickEvent.currentTarget.disabled = true;

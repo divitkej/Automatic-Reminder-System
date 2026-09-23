@@ -36,7 +36,26 @@ const config = {
 
   defaultTimezone: process.env.DEFAULT_TIMEZONE || 'Asia/Dubai',
 
-  dryRun: bool(process.env.DRY_RUN, true),
+  /**
+   * How a message leaves the system once it is due.
+   *
+   *   draft   The system works out who gets what and when, then holds the
+   *           finished message in a queue for a member of staff to hand to
+   *           whoever actually sends campus mail. Nothing is delivered from
+   *           here. This is the default.
+   *   send    Delivered directly over SMTP and the configured gateways.
+   *   preview Pretends to send, for testing. Messages are marked sent with
+   *           the `preview` provider and nothing leaves the machine.
+   */
+  deliveryMode: (() => {
+    const named = String(process.env.DELIVERY_MODE || '').trim().toLowerCase();
+    if (['draft', 'send', 'preview'].includes(named)) return named;
+    // DRY_RUN is the older setting. Honour it so an existing .env keeps working.
+    if (process.env.DRY_RUN !== undefined && process.env.DELIVERY_MODE === undefined) {
+      return bool(process.env.DRY_RUN, true) ? 'preview' : 'send';
+    }
+    return 'draft';
+  })(),
 
   mail: {
     host: process.env.SMTP_HOST || '',
@@ -76,5 +95,10 @@ const config = {
 
 config.auth.enabled = config.auth.password.length > 0;
 config.mail.configured = config.mail.host.length > 0;
+
+config.isDraftMode = config.deliveryMode === 'draft';
+// Kept because a lot of code reads it: preview behaves as dry run always did,
+// and draft never reaches a provider at all.
+config.dryRun = config.deliveryMode === 'preview';
 
 module.exports = config;

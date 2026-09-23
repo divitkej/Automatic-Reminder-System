@@ -1,7 +1,7 @@
 import { h, frag } from '../dom.js';
 import { api } from '../api.js';
 import { icon } from '../icons.js';
-import { setHeader, setMain, state } from '../shell.js';
+import { setHeader, setMain, state, setDueCount } from '../shell.js';
 import { panel, tiles, dataTable, notice, statusBadge, toast, emptyState } from '../components.js';
 import { relative, plural } from '../format.js';
 
@@ -17,17 +17,23 @@ export async function dashboardView() {
           event.currentTarget.disabled = true;
           try {
             const result = await api.post('/system/scheduler/tick');
-            const sent = result.dispatch ? result.dispatch.sent : 0;
-            toast(sent > 0
-              ? `Scheduler run finished. ${plural(sent, 'message')} sent.`
-              : 'Scheduler run finished. Nothing was due.');
+            const dispatch = result.dispatch || {};
+            if (state.meta.is_draft_mode) {
+              toast(dispatch.waiting_for_handoff > 0
+                ? `${plural(dispatch.waiting_for_handoff, 'message')} waiting in the To send queue.`
+                : 'Schedule brought up to date. Nothing is due yet.');
+            } else {
+              toast(dispatch.sent > 0
+                ? `Scheduler run finished. ${plural(dispatch.sent, 'message')} sent.`
+                : 'Scheduler run finished. Nothing was due.');
+            }
             dashboardView();
           } catch (error) {
             toast(error.message, 'error');
             event.currentTarget.disabled = false;
           }
         },
-      }, icon('refresh'), 'Run the scheduler now'),
+      }, icon('refresh'), state.meta.is_draft_mode ? 'Bring the schedule up to date' : 'Run the scheduler now'),
       h('a.btn.btn-primary', { href: '/events/new' }, icon('plus'), 'New event')),
   });
 
@@ -50,22 +56,36 @@ export async function dashboardView() {
       h('p.small', 'Run "npm run reset" to clear it, or set SEED_DEMO_DATA=false before the first start of a fresh database.')))
     : null;
 
-  const dryRunNote = state.meta.dry_run
-    ? notice('info', h('div',
-      h('p', 'Dry run is on. Every message is composed, scheduled and recorded in full, but nothing leaves the machine.'),
-      h('p.small', 'Set DRY_RUN=false in the environment once the SMTP details have been checked against a test event.')))
-    : null;
+  setDueCount(data.messages.due_now);
+
+  const modeNote = state.meta.is_draft_mode
+    ? (data.messages.due_now > 0
+      ? notice('warning', h('div',
+        h('p', h('strong', `${plural(data.messages.due_now, 'message')} ready to send.`),
+          ' The schedule has produced them and they are waiting to be handed over.'),
+        h('p', h('a.btn.btn-small.btn-primary', { href: '/to-send' }, 'Open the queue'))))
+      : notice('info', h('div',
+        h('p', h('strong', 'The system is drafting, not sending.'),
+          ' It works out who gets what and when, then holds each message for you to hand over.'),
+        h('p.small', 'Nothing is waiting right now. Messages appear in the To send queue as their scheduled times arrive.'))))
+    : state.meta.dry_run
+      ? notice('info', h('div',
+        h('p', 'Dry run is on. Every message is composed, scheduled and recorded in full, but nothing leaves the machine.'),
+        h('p.small', 'Set DELIVERY_MODE=send once the SMTP details have been checked against a test event.')))
+      : null;
 
   setMain(
     demoNote,
-    dryRunNote,
+    modeNote,
     schedulerNote,
     attention,
 
     tiles([
       { label: 'Live events', value: data.counts.events_live, note: `${data.counts.events_draft} in draft`, href: '/events?status=scheduled' },
       { label: 'Next seven days', value: data.counts.events_next_7_days, note: 'events starting' },
-      { label: 'Due in 24 hours', value: data.messages.due_24h, note: 'messages scheduled', href: '/messages?status=scheduled' },
+      state.meta.is_draft_mode
+        ? { label: 'Ready to send', value: data.messages.due_now, note: 'waiting to be handed over', href: '/to-send' }
+        : { label: 'Due in 24 hours', value: data.messages.due_24h, note: 'messages scheduled', href: '/messages?status=scheduled' },
       { label: 'Sent in 24 hours', value: data.messages.sent_24h, note: 'messages delivered', href: '/messages?status=sent' },
       { label: 'Students on file', value: data.counts.students_active, note: `${data.counts.students_opted_out} opted out`, href: '/students' },
     ]),

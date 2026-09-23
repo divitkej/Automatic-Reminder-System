@@ -108,6 +108,53 @@ function buildLinks(event, registration, messageId) {
   };
 }
 
+/**
+ * The context for a message that will be sent to a whole group at once.
+ *
+ * There is no individual here, so there can be no individual links. Every
+ * personal link is replaced by the event's public page, where a student
+ * identifies themselves before replying. This exists so that a batch copied
+ * into a BCC field can never carry one student's private token to everyone
+ * else, which would let any of them answer as that student.
+ */
+function buildGenericContext({ event, at = Date.now() }) {
+  const base = config.publicBaseUrl;
+  const publicPage = `${base}/e/${event.id}`;
+  return {
+    event: buildEventContext(event, at),
+    student: {
+      id: '',
+      campus_id: '',
+      name: 'student',
+      first_name: 'student',
+      last_name: '',
+      email: '',
+      phone: '',
+      program: '',
+      discipline: '',
+      year_of_study: '',
+      batch: '',
+    },
+    registration: { status: 'invited', is_registered: false, has_declined: false, attended: false },
+    links: {
+      details: publicPage,
+      register: publicPage,
+      decline: publicPage,
+      feedback: event.feedback_mode === 'external' && event.feedback_form_url
+        ? event.feedback_form_url
+        : `${publicPage}/feedback`,
+      calendar: `${publicPage}/calendar.ics`,
+    },
+    org: {
+      name: config.org.name,
+      short_name: config.org.shortName,
+      email: config.org.email,
+      phone: config.org.phone,
+    },
+    system: { year: String(new Date().getFullYear()), base_url: config.publicBaseUrl },
+  };
+}
+
 /** The full context for one message. */
 function buildContext({ event, student, registration, messageId, at = Date.now() }) {
   return {
@@ -192,4 +239,4 @@ function fieldCatalogue() {
   return out.sort();
 }
 
-module.exports = { buildContext, sampleContext, fieldCatalogue, buildEventContext, buildStudentContext, buildLinks, firstName };
+module.exports = { buildContext, buildGenericContext, sampleContext, fieldCatalogue, buildEventContext, buildStudentContext, buildLinks, firstName };

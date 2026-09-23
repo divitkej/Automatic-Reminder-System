@@ -6,7 +6,8 @@ const dt = require('../lib/datetime');
 const config = require('../config');
 const tpl = require('../lib/template');
 const { NotFoundError, ValidationError } = require('../lib/errors');
-const { buildContext } = require('./context');
+const csv = require('../lib/csv');
+const { buildContext, buildGenericContext } = require('./context');
 const channels = require('./channels');
 const events = require('./events');
 const rules = require('./rules');
@@ -158,13 +159,14 @@ function materialise(eventId, { actor = 'system' } = {}) {
         getDb().prepare(`
           INSERT INTO messages (id, dedupe_key, event_id, rule_id, registration_id, student_id,
                                 category, channel, label, to_address, subject, body,
-                                scheduled_for, status, skip_reason, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                scheduled_for, status, skip_reason, batch_key, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(messageId, dedupeKey, eventId, rule.id, recipient.id, recipient.student_id,
           rule.category, rule.channel, rule.label, address,
           rendered.subject, rendered.body, sendAt,
           address ? 'scheduled' : 'skipped',
-          address ? null : channels.reasonUnreachable(rule.channel), at, at);
+          address ? null : channels.reasonUnreachable(rule.channel),
+          `${rule.id}@${sendAt}`, at, at);
         report.created += 1;
       }
     }
@@ -224,8 +226,15 @@ function dueMessages(limit) {
   `).all(now, floor, limit);
 }
 
-/** Drop anything that fell too far behind to be worth sending. */
+/**
+ * Drop anything that fell too far behind to be worth sending.
+ *
+ * This only applies when the system sends for itself. In draft mode a message
+ * sits in the queue until a person deals with it, and expiring it after three
+ * hours would quietly delete the work they were meant to do.
+ */
 function expireStale() {
+  if (config.isDraftMode) return 0;
   const floor = new Date(Date.now() - config.scheduler.maxLatenessMinutes * 60 * 1000).toISOString();
   return getDb().prepare(`
     UPDATE messages SET status = 'skipped',
@@ -233,6 +242,267 @@ function expireStale() {
       updated_at = ?
     WHERE status = 'scheduled' AND scheduled_for < ?
   `).run(dt.nowIso(), floor).changes;
+}
+
+// ---------------------------------------------------------------------------
+// Draft mode: handing messages over instead of sending them
+// ---------------------------------------------------------------------------
+
+/**
+ * Messages that have come due, grouped the way they will be handed over: one
+ * batch per reminder per moment. A batch is what a member of staff actually
+ * deals with, because "the day before reminder for this event" is one action
+ * even though it is twenty-four separate personalised emails.
+ */
+function dueBatches({ limit = 100 } = {}) {
+  const now = new Date().toISOString();
+  return getDb().prepare(`
+    SELECT m.batch_key, m.event_id, m.rule_id, m.label, m.category, m.channel,
+           m.scheduled_for, e.name AS event_name, e.timezone, e.event_date,
+           COUNT(*) AS recipients,
+           SUM(CASE WHEN m.to_address IS NULL THEN 1 ELSE 0 END) AS unreachable,
+           MIN(m.subject) AS subject
+    FROM messages m
+    JOIN events e ON e.id = m.event_id
+    WHERE m.status = 'scheduled' AND m.scheduled_for <= ? AND m.batch_key IS NOT NULL
+    GROUP BY m.batch_key
+    ORDER BY m.scheduled_for
+    LIMIT ?
+  `).all(now, limit).map((row) => ({
+    ...row,
+    scheduled_local: (() => {
+      const local = dt.utcToZoned(row.scheduled_for, row.timezone || config.defaultTimezone);
+      return `${dt.formatLongDate(local.date)}, ${dt.formatTime12(local.time)}`;
+    })(),
+    due_relative: dt.relativeToNow(row.scheduled_for),
+  }));
+}
+
+/** How many messages are sitting in the queue waiting for a person. */
+function dueCount() {
+  return getDb()
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'scheduled' AND scheduled_for <= ?")
+    .get(new Date().toISOString()).n;
+}
+
+function batchMessages(batchKey) {
+  return getDb().prepare(`
+    SELECT m.*, s.name AS student_name, s.campus_id, s.email, s.phone,
+           e.name AS event_name, e.timezone
+    FROM messages m
+    JOIN students s ON s.id = m.student_id
+    JOIN events e ON e.id = m.event_id
+    WHERE m.batch_key = ?
+    ORDER BY s.name COLLATE NOCASE
+  `).all(batchKey);
+}
+
+function getBatch(batchKey) {
+  const messages = batchMessages(batchKey);
+  if (messages.length === 0) throw new NotFoundError('Batch');
+  const first = messages[0];
+  const sendable = messages.filter((m) => m.status === 'scheduled' && m.to_address);
+  return {
+    batch_key: batchKey,
+    event_id: first.event_id,
+    event_name: first.event_name,
+    rule_id: first.rule_id,
+    label: first.label,
+    category: first.category,
+    channel: first.channel,
+    scheduled_for: first.scheduled_for,
+    recipients: messages.length,
+    sendable: sendable.length,
+    unreachable: messages.filter((m) => !m.to_address).length,
+    already_handled: messages.filter((m) => m.status !== 'scheduled').length,
+    messages,
+  };
+}
+
+/**
+ * Record that a batch has been handed over and actually sent.
+ *
+ * Nothing about the delivery happened here, so this is a statement by a member
+ * of staff rather than a fact the system observed. It is recorded as such: the
+ * provider is "handed off" and the person who said so is kept against every
+ * message in the batch.
+ */
+function markBatchSent(batchKey, { actor = 'staff', note = null } = {}) {
+  const batch = getBatch(batchKey);
+  const at = dt.nowIso();
+  const changed = getDb().prepare(`
+    UPDATE messages
+    SET status = 'sent', provider = 'handed_off', sent_at = ?,
+        handed_off_at = ?, handed_off_by = ?, updated_at = ?
+    WHERE batch_key = ? AND status = 'scheduled' AND to_address IS NOT NULL
+  `).run(at, at, actor, at, batchKey).changes;
+
+  activity.log({
+    eventId: batch.event_id,
+    actor,
+    action: 'outbox.handed_off',
+    detail: `${batch.label || 'Message'}: ${changed} recipient${changed === 1 ? '' : 's'} marked as sent${note ? `. ${note}` : ''}`,
+  });
+  return { changed, batch: getBatch(batchKey) };
+}
+
+/** Put a batch back in the queue, for a handoff that did not happen. */
+function reopenBatch(batchKey, { actor = 'staff' } = {}) {
+  const batch = getBatch(batchKey);
+  const changed = getDb().prepare(`
+    UPDATE messages
+    SET status = 'scheduled', provider = NULL, sent_at = NULL,
+        handed_off_at = NULL, handed_off_by = NULL, updated_at = ?
+    WHERE batch_key = ? AND provider = 'handed_off'
+  `).run(dt.nowIso(), batchKey).changes;
+
+  activity.log({
+    eventId: batch.event_id,
+    actor,
+    action: 'outbox.reopened',
+    detail: `${batch.label || 'Message'}: ${changed} recipient${changed === 1 ? '' : 's'} put back in the queue`,
+  });
+  return { changed, batch: getBatch(batchKey) };
+}
+
+/**
+ * A batch as a mail merge file: one row per student, carrying that student's
+ * own subject, body and personal links. This is the format that keeps
+ * everything working, because each student still gets their own registration
+ * and feedback links and so their replies are still tracked.
+ */
+function batchAsCsv(batchKey) {
+  const batch = getBatch(batchKey);
+  return csv.stringify([
+    { key: 'email', label: 'Email' },
+    { key: 'student_name', label: 'Name' },
+    { key: 'campus_id', label: 'Campus ID' },
+    { key: 'phone', label: 'Phone' },
+    { key: 'subject', label: 'Subject' },
+    { key: 'body', label: 'Body' },
+  ], batch.messages.filter((m) => m.to_address).map((m) => ({ ...m, email: m.to_address })));
+}
+
+/**
+ * A batch rendered once, for sending to everyone at the same time.
+ *
+ * Not simply the first student's copy: that would put their private
+ * registration token in front of the whole group. The message is re-rendered
+ * with no individual in it, so the links point at the event's public page
+ * instead, where a student identifies themselves before replying.
+ */
+function batchGeneric(batchKey) {
+  const batch = getBatch(batchKey);
+  const event = events.get(batch.event_id);
+  const rule = batch.rule_id
+    ? getDb().prepare('SELECT * FROM reminder_rules WHERE id = ?').get(batch.rule_id)
+    : null;
+  const template = rule && rule.template_id
+    ? getDb().prepare('SELECT * FROM templates WHERE id = ?').get(rule.template_id)
+    : null;
+
+  const context = buildGenericContext({ event, at: new Date(batch.scheduled_for).getTime() });
+
+  if (template) {
+    return {
+      subject: template.subject ? tpl.tidy(tpl.render(template.subject, context)) : null,
+      body: tpl.tidy(tpl.render(template.body, context)),
+      personalised: false,
+    };
+  }
+
+  // An ad hoc message has no template to re-render, so the stored copy is
+  // stripped of anything that identifies one student.
+  const first = batch.messages[0];
+  return {
+    subject: first ? first.subject : null,
+    body: stripPersonalLinks(first ? first.body : '', event),
+    personalised: false,
+  };
+}
+
+/** Replace any personal token link with the event's public page. */
+function stripPersonalLinks(body, event) {
+  const base = config.publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const publicPage = `${config.publicBaseUrl}/e/${event.id}`;
+  return String(body || '')
+    .replace(new RegExp(`${base}/r/[^\\s)]+`, 'g'), publicPage)
+    .replace(new RegExp(`${base}/f/[^\\s)]+`, 'g'), `${publicPage}/feedback`);
+}
+
+/** The address list, for a batch that will be sent as one message. */
+function batchRecipients(batchKey, { separator = ', ' } = {}) {
+  return getBatch(batchKey).messages
+    .filter((m) => m.to_address)
+    .map((m) => m.to_address)
+    .join(separator);
+}
+
+/**
+ * A batch as RFC 5322 messages, for a mail client or relay that takes .eml
+ * files. Personalisation survives, one file per student, concatenated in the
+ * mbox style so the whole batch is a single download.
+ */
+function batchAsEml(batchKey) {
+  const batch = getBatch(batchKey);
+  const parts = [];
+  for (const message of batch.messages) {
+    if (!message.to_address) continue;
+    const html = message.channel === 'email'
+      ? channels.email.textToHtml(message.body, { title: message.subject })
+      : null;
+    const boundary = `----career-services-${message.id}`;
+    const headers = [
+      `From: ${config.mail.from}`,
+      `To: ${message.to_address}`,
+      `Subject: ${encodeHeader(message.subject || '')}`,
+      `Date: ${new Date(message.scheduled_for).toUTCString()}`,
+      `Message-ID: <${message.id}@career-services.dubai.bits-pilani.ac.in>`,
+      'MIME-Version: 1.0',
+    ];
+    if (config.mail.replyTo) headers.push(`Reply-To: ${config.mail.replyTo}`);
+
+    if (html) {
+      headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+      parts.push([
+        `From ${config.org.email} ${new Date(message.scheduled_for).toUTCString()}`,
+        headers.join('\r\n'),
+        '',
+        `--${boundary}`,
+        'Content-Type: text/plain; charset=utf-8',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        message.body,
+        '',
+        `--${boundary}`,
+        'Content-Type: text/html; charset=utf-8',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        html,
+        '',
+        `--${boundary}--`,
+        '',
+      ].join('\r\n'));
+    } else {
+      headers.push('Content-Type: text/plain; charset=utf-8');
+      parts.push([
+        `From ${config.org.email} ${new Date(message.scheduled_for).toUTCString()}`,
+        headers.join('\r\n'),
+        '',
+        message.body,
+        '',
+      ].join('\r\n'));
+    }
+  }
+  return parts.join('\r\n');
+}
+
+/** RFC 2047 encoding, so a subject with non-ASCII characters survives. */
+function encodeHeader(value) {
+  const text = String(value || '');
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x20-\x7E]*$/.test(text)) return text;
+  return `=?UTF-8?B?${Buffer.from(text, 'utf8').toString('base64')}?=`;
 }
 
 async function sendOne(message) {
@@ -318,11 +588,33 @@ async function sendOne(message) {
   }
 }
 
-/** One pass of the dispatcher. */
+/**
+ * One pass of the dispatcher.
+ *
+ * In draft mode nothing is delivered: due messages simply stay where they are
+ * and are reported as waiting for a person. Everything upstream of this point,
+ * the schedule, the audience, the rendering, is identical either way, so
+ * switching the mode later changes nothing about what students receive.
+ */
 async function dispatch({ limit = config.scheduler.batchSize } = {}) {
+  if (config.isDraftMode) {
+    const waiting = dueCount();
+    return {
+      mode: 'draft',
+      considered: waiting,
+      waiting_for_handoff: waiting,
+      batches: dueBatches({ limit: 200 }).length,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      retry: 0,
+      expired: 0,
+    };
+  }
+
   const expired = expireStale();
   const batch = dueMessages(limit);
-  const result = { considered: batch.length, sent: 0, failed: 0, skipped: 0, retry: 0, expired };
+  const result = { mode: config.deliveryMode, considered: batch.length, sent: 0, failed: 0, skipped: 0, retry: 0, expired };
   for (const message of batch) {
     const outcome = await sendOne(message);
     if (outcome.status === 'sent') result.sent += 1;
@@ -335,6 +627,9 @@ async function dispatch({ limit = config.scheduler.batchSize } = {}) {
 
 /** Send one message immediately, whatever its scheduled time. */
 async function sendNow(messageId) {
+  if (config.isDraftMode) {
+    throw new ValidationError('This system is in draft mode, so it does not send. Hand the message over from the To send queue and mark it as sent.');
+  }
   const message = getDb().prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
   if (!message) throw new NotFoundError('Message');
   if (message.status === 'sent') throw new ValidationError('That message has already been sent.');
@@ -380,14 +675,14 @@ function queueAdHoc(eventId, { templateId, subject, body, channel = 'email', aud
       getDb().prepare(`
         INSERT INTO messages (id, dedupe_key, event_id, rule_id, registration_id, student_id,
                               category, channel, label, to_address, subject, body,
-                              scheduled_for, status, skip_reason, created_at, updated_at)
-        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              scheduled_for, status, skip_reason, batch_key, created_at, updated_at)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(messageId, `${batchId}:${recipient.id}`, eventId, recipient.id, recipient.student_id,
         category, channel, label, address,
         useSubject ? tpl.tidy(tpl.render(useSubject, context)) : null,
         tpl.tidy(tpl.render(useBody, context)),
         when, address ? 'scheduled' : 'skipped',
-        address ? null : channels.reasonUnreachable(channel), at, at);
+        address ? null : channels.reasonUnreachable(channel), batchId, at, at);
       if (address) queued += 1;
       else skipped += 1;
     }
@@ -431,13 +726,13 @@ function queueTransactional(registrationId, templateKey, { label, category, acto
   db.prepare(`
     INSERT INTO messages (id, dedupe_key, event_id, rule_id, registration_id, student_id,
                           category, channel, label, to_address, subject, body,
-                          scheduled_for, status, created_at, updated_at)
-    VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)
+                          scheduled_for, status, batch_key, created_at, updated_at)
+    VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?)
     ON CONFLICT (dedupe_key) DO NOTHING
   `).run(messageId, dedupeKey, event.id, registration.id, registration.student_id,
     category || template.category, template.channel, label || template.name, address,
     template.subject ? tpl.tidy(tpl.render(template.subject, context)) : null,
-    tpl.tidy(tpl.render(template.body, context)), at, at, at);
+    tpl.tidy(tpl.render(template.body, context)), at, dedupeKey, at, at);
 
   return { queued: 1, messageId };
 }
@@ -537,5 +832,7 @@ module.exports = {
   queueAdHoc, queueTransactional, listMessages, getMessage, cancelMessage,
   scheduleSummary, recordOpen, recordClick, recipientsFor, countRecipients,
   matchesAudience, renderMessage, decorateMessage, dueMessages, expireStale,
+  dueBatches, dueCount, getBatch, batchMessages, markBatchSent, reopenBatch,
+  batchAsCsv, batchRecipients, batchAsEml, batchGeneric, stripPersonalLinks,
   AUDIENCE_SQL,
 };

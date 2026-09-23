@@ -62,7 +62,8 @@ app.use(require('./routes/public'));
 app.use('/api', auth.requireStaff, require('./routes/api'));
 
 const CONSOLE_ROUTES = ['/', '/events', '/events/*splat', '/students', '/students/*splat',
-  '/groups', '/groups/*splat', '/templates', '/templates/*splat', '/messages', '/reports', '/settings'];
+  '/groups', '/groups/*splat', '/templates', '/templates/*splat', '/messages',
+  '/to-send', '/to-send/*splat', '/reports', '/settings'];
 
 app.get(CONSOLE_ROUTES, auth.requireStaff, (req, res) => {
   res.sendFile(path.join(config.rootDir, 'public', 'index.html'));
@@ -104,6 +105,18 @@ app.use((error, req, res, next) => { // eslint-disable-line no-unused-vars
 // ---------------------------------------------------------------------------
 // Start up
 // ---------------------------------------------------------------------------
+function describeDelivery() {
+  if (config.deliveryMode === 'draft') {
+    return 'DRAFT. Messages are prepared and held in the To send queue for a person to hand over.';
+  }
+  if (config.deliveryMode === 'preview') {
+    return 'DRY RUN. Messages are recorded but not sent.';
+  }
+  return config.mail.configured
+    ? `SEND, over SMTP via ${config.mail.host}`
+    : 'SEND is set but no SMTP host is configured, so email is recorded rather than delivered.';
+}
+
 function bootstrap() {
   migrate();
   const templateReport = templates.installSystemTemplates();
@@ -125,7 +138,7 @@ function start() {
       `  Database     ${config.databaseFile}`,
       `  Templates    ${templateReport.installed} installed, ${templateReport.refreshed} refreshed, ${templateReport.preserved} kept as edited`,
       `  Scheduler    ${schedulerReport.started ? `every ${schedulerReport.intervalSeconds} seconds` : schedulerReport.reason}`,
-      `  Delivery     ${config.dryRun ? 'DRY RUN. Messages are recorded but not sent.' : (config.mail.configured ? `SMTP via ${config.mail.host}` : 'No SMTP host configured, so email is recorded but not sent.')}`,
+      `  Delivery     ${describeDelivery()}`,
       `  Sign in      ${config.auth.enabled ? 'Staff password required' : 'Open, no password set'}`,
     ];
     if (seedReport.seeded) lines.push(`  Demo data    ${seedReport.students} students, ${seedReport.events} events`);

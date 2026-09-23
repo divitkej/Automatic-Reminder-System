@@ -7,8 +7,15 @@ import { api } from './api.js';
 
 export const state = {
   meta: null,
-  counts: { events: null, messages: null },
+  // How many messages are sitting in the handoff queue. Refreshed by any view
+  // that learns the number, so the navigation badge stays honest.
+  dueCount: null,
 };
+
+export function setDueCount(value) {
+  state.dueCount = value;
+  renderNav();
+}
 
 const NAV = [
   { href: '/', label: 'Dashboard', icon: 'dashboard' },
@@ -16,7 +23,8 @@ const NAV = [
   { href: '/students', label: 'Students', icon: 'people' },
   { href: '/groups', label: 'Groups', icon: 'group' },
   { href: '/templates', label: 'Templates', icon: 'document' },
-  { href: '/messages', label: 'Outbox', icon: 'send' },
+  { href: '/to-send', label: 'To send', icon: 'send', draftOnly: true, count: 'due' },
+  { href: '/messages', label: 'Outbox', icon: 'clock' },
   { href: '/reports', label: 'Reports', icon: 'chart' },
   { href: '/settings', label: 'Settings', icon: 'settings' },
 ];
@@ -29,21 +37,28 @@ export async function loadMeta() {
 export function renderNav() {
   const path = window.location.pathname;
   const list = document.getElementById('nav');
-  mount(list, NAV.map((item) => {
+  mount(list, NAV.filter((item) => !item.draftOnly || (state.meta && state.meta.is_draft_mode)).map((item) => {
     const active = item.href === '/' ? path === '/' : path.startsWith(item.href);
+    const badgeValue = item.count === 'due' && state.dueCount ? String(state.dueCount) : null;
     return h('li', h('a', { href: item.href, 'aria-current': active ? 'page' : null },
-      icon(item.icon), h('span', item.label)));
+      icon(item.icon), h('span', item.label),
+      badgeValue ? h('span.nav-count', badgeValue) : null));
   }));
 
   mount(document.getElementById('sidebar-foot'),
-    state.meta && state.meta.dry_run
-      ? h('p', h('span.dry-run-flag', 'Dry run'))
-      : null,
+    state.meta ? h('p', h('span.dry-run-flag', deliveryLabel(state.meta.delivery_mode))) : null,
     h('p', state.meta ? state.meta.org.short_name : ''),
     h('p', h('a', { href: '/privacy' }, 'Privacy'), ' ', h('a', { href: '/terms' }, 'Terms')));
 }
 
 /** Set the page header. Actions are buttons or links on the right. */
+/** Plain words for the delivery mode, shown in the sidebar. */
+export function deliveryLabel(mode) {
+  if (mode === 'draft') return 'Drafting';
+  if (mode === 'preview') return 'Dry run';
+  return 'Sending';
+}
+
 export function setHeader({ title, subtitle, actions, back }) {
   mount(document.getElementById('topbar'),
     h('.topbar-text',

@@ -11,6 +11,7 @@ import { studentsView, studentDetailView } from './views/students.js';
 import { groupsView, groupDetailView } from './views/groups.js';
 import { templatesView, templateDetailView } from './views/templates.js';
 import { outboxView } from './views/outbox.js';
+import { toSendView, batchView } from './views/tosend.js';
 import { reportsView } from './views/reports.js';
 import { settingsView } from './views/settings.js';
 
@@ -25,6 +26,8 @@ route('/groups', view(groupsView));
 route('/groups/:id', view(groupDetailView));
 route('/templates', view(templatesView));
 route('/templates/:id', view(templateDetailView));
+route('/to-send', view(toSendView));
+route('/to-send/:key', view(batchView));
 route('/messages', view(outboxView));
 route('/reports', view(reportsView));
 route('/settings', view(settingsView));

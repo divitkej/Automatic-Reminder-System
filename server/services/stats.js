@@ -37,6 +37,9 @@ function dashboard() {
     sent_24h: db.prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'sent' AND sent_at >= ?").get(dayAgo).n,
     due_24h: db.prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'scheduled' AND scheduled_for BETWEEN ? AND ?").get(nowIso, in24h).n,
     pending_total: db.prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'scheduled'").get().n,
+    // Messages whose moment has arrived. In draft mode these are waiting for a
+    // person to hand them over; in send mode the worker is about to take them.
+    due_now: db.prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'scheduled' AND scheduled_for <= ?").get(nowIso).n,
     failed_7d: db.prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'failed' AND updated_at >= ?").get(new Date(now.getTime() - 7 * dt.DAY).toISOString()).n,
     skipped_7d: db.prepare("SELECT COUNT(*) AS n FROM messages WHERE status = 'skipped' AND updated_at >= ?").get(new Date(now.getTime() - 7 * dt.DAY).toISOString()).n,
   };

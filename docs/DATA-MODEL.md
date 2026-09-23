@@ -38,6 +38,14 @@ through to sent, failed, skipped or withdrawn. `dedupe_key` is
 `<rule id>:<registration id>`, and the unique index on it is what makes
 materialisation safe to run on every worker tick.
 
+`batch_key` groups the messages that are handed over together: one reminder at
+one moment, however many students. While the system is drafting, a message that
+is `scheduled` with a `scheduled_for` in the past is one waiting for a person,
+and that is what the To send queue lists. `handed_off_at` and `handed_off_by`
+record who said a batch had actually gone, which is a statement by a member of
+staff rather than something the system observed. The provider on such a message
+reads `handed_off` rather than naming a mail server.
+
 **`templates`** holds the wording. `is_system` marks the templates that ship
 with the product; a system template whose `updated_at` has moved past its
 `created_at` has been edited locally and is never overwritten by an upgrade.

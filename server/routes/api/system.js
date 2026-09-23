@@ -31,6 +31,8 @@ router.get('/meta', asyncHandler(async (req, res) => {
     default_timezone: config.defaultTimezone,
     public_base_url: config.publicBaseUrl,
     dry_run: config.dryRun,
+    delivery_mode: config.deliveryMode,
+    is_draft_mode: config.isDraftMode,
     auth_enabled: config.auth.enabled,
     // Set when the demonstration data was loaded into an empty database, so
     // every screen that shows figures can say where those figures came from.

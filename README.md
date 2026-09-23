@@ -65,6 +65,52 @@ before the first start to skip it, or run `npm run reset` to clear everything.
 
 ---
 
+## Drafting, not sending
+
+**By default this system does not send anything.** It decides who gets what and
+when, renders every message in full, and then stops and waits.
+
+When a message comes due it appears in the **To send** queue, grouped into
+batches: one reminder for one event is one batch, however many students it goes
+to. You open the batch, take the messages out in whichever form suits whoever
+sends campus mail, and mark it as sent.
+
+This exists because most campuses already have someone who sends bulk mail, and
+the hard part was never the sending. It was working out that twenty-four
+students need the day-before reminder but the six who declined do not, and that
+it is due at five o'clock tomorrow.
+
+### Taking a batch out
+
+**Mail merge file (recommended).** A CSV with one row per student, carrying that
+student's own subject, body and personal links. Every student keeps a working
+registration link, so their replies are still recorded here automatically and
+the reminders that depend on who replied keep working.
+
+**An .eml bundle.** The same messages as RFC 5322 files, for a mail client or
+relay that takes them directly.
+
+**One message to everyone.** Copy the address list into BCC and the text into
+the body. The text is rendered once with nobody in it: it greets the reader as
+"student", and every link points at the event's public page rather than at a
+personal one. A student gives their campus ID and campus email there and then
+confirms or declines exactly as they would from a personal link.
+
+The system never hands you one student's copy to send to a group. That would put
+their private registration token in front of everyone else, and any of them could
+answer as that student.
+
+### Marking a batch as sent
+
+The system did not send it, so this is your word rather than something it
+observed. It matters, because the reminders that follow, such as the chase to
+students who have not replied, are timed from that point. A batch marked by
+mistake can be put back in the queue.
+
+Every message records who marked it and when.
+
+---
+
 ## Configuration
 
 All settings are environment variables, documented in `.env.example`. The ones
@@ -72,21 +118,27 @@ that matter most:
 
 | Variable | What it does |
 | --- | --- |
-| `DRY_RUN` | **Defaults to `true`.** Every message is composed, scheduled, tracked and shown in the outbox, but nothing is delivered. Leave it on until you have run a test event end to end. |
-| `PUBLIC_BASE_URL` | The address that goes into every registration and feedback link. If it is wrong, students click links that do not resolve. |
-| `SMTP_HOST` and friends | The campus mail server. With no host set, email stays in preview mode whatever `DRY_RUN` says. |
+| `DELIVERY_MODE` | **Defaults to `draft`.** `draft` holds each message for a person to hand over. `send` delivers over SMTP and the configured gateways. `preview` pretends to send, for testing. |
+| `PUBLIC_BASE_URL` | The address that goes into every registration and feedback link. If it is wrong, students click links that do not resolve. This is the one setting you cannot leave at its default in production. |
 | `STAFF_PASSWORD` | A shared password for the console. Empty means no login screen, which is only safe on a machine nobody else can reach. |
-| `SCHEDULER_ENABLED` | The background worker. Off means nothing is ever sent automatically. |
+| `SCHEDULER_ENABLED` | The background worker. Off means the queue never fills and nothing is ever sent. |
 | `DEFAULT_TIMEZONE` | `Asia/Dubai`. Each event can override it, which matters for a session run with a partner in another country. |
+| `SMTP_HOST` and friends | Only needed for `DELIVERY_MODE=send`. Ignored entirely while drafting. |
 
-### Going live
+### If you later want it to send for itself
 
-1. Keep `DRY_RUN=true`. Create a real event, publish it, and read the messages
-   in the outbox. They are complete, including the personal links.
-2. Fill in the SMTP details. The settings screen verifies the connection.
-3. Set `DRY_RUN=false` and restart.
+1. Get the campus SMTP details. Many campuses run an internal relay that
+   accepts mail from an approved server without credentials, in which case
+   leave `SMTP_USER` and `SMTP_PASS` empty.
+2. Set `DELIVERY_MODE=preview` and run a test event. Messages are composed and
+   recorded without being delivered.
+3. Set `DELIVERY_MODE=send` and restart. The settings screen verifies the
+   connection.
 4. Run one event with a small audience, ideally the Career Services team
    themselves, before pointing it at a cohort.
+
+Nothing else changes. The schedule, the audience rules and the message wording
+are identical in either mode.
 
 ---
 
@@ -184,7 +236,8 @@ that has already started is worse than no reminder.
 
 ### Registration, capacity and the waiting list
 
-Students reply through a personal link. Where an event has a capacity,
+Students reply through a personal link, or through the event's public page if
+the message went out to a group. Where an event has a capacity,
 confirmations past the limit join a waiting list. A withdrawal promotes the
 earliest waiting student automatically and sends them their confirmation, so
 the released place is actually taken up. That is the job Career Services
@@ -219,11 +272,16 @@ original can be restored at any time.
 
 ### Channels
 
-Email goes out over SMTP, wrapped in a plain institutional layout that survives
-Outlook, Gmail and a phone on campus wifi. SMS and WhatsApp post a small JSON
-payload to a gateway URL, so the campus can use whichever provider it has
-contracted without the system needing to know about it. A channel with nothing
-configured records its messages in full and sends nothing.
+While drafting, the channel decides how a message is prepared rather than how it
+travels. Email is rendered as plain text plus a simple institutional HTML layout
+that survives Outlook, Gmail and a phone on campus wifi, and both are in the
+.eml bundle. SMS and WhatsApp are prepared as plain text against the student's
+mobile number.
+
+If the system is later set to send for itself, email goes over SMTP and the
+other two post a small JSON payload to a gateway URL, so the campus can use
+whichever provider it has contracted without the system needing to know about
+it.
 
 ---
 
@@ -258,7 +316,7 @@ server/
     channels/           email, SMS, WhatsApp
   routes/
     api/                the JSON API
-    public.js           student registration and feedback
+    public.js           student registration, the public event page, feedback
     legal.js            privacy and terms
     auth.js             staff sign in
 public/
@@ -268,13 +326,15 @@ public/
     console.css         staff console
     public.css          student pages
     js/                 ES modules, no build step
-test/                   38 tests
+test/                   54 tests
 ```
 
 ---
 
 ## What it deliberately does not do
 
+- **It does not send.** By default it decides and drafts; delivery is done by
+  whoever sends campus mail. It can send for itself if you configure it to.
 - **It does not read replies.** A student who answers a reminder by email
   reaches the Career Services inbox, as they should.
 - **It does not hold documents.** CVs and slide decks live where they already
